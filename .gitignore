@@ -1,5 +1,7 @@
 *.gz
 .venv/
-twitter_api.ipynb
+.env
+DS_STORE
+
 
 
