@@ -7,3 +7,4 @@ I then explored the data and found the needed variables to gain closure insight,
 Parsing the data may be challenging and using predicting the closures can not be done with this data alone. The next goal is to get closures and then narrow the table down to one row per date with a boolean column stating whether there was a closure (this is the target variable), the length of closure, and temperature variables. These will be used in the model to predict whether there is a closure or not and the length of closure.
 
 
+This did not work, working on model that can be trained so that it correctly classifies tweets with high accuracy.
