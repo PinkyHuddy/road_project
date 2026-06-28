@@ -3,6 +3,7 @@ import openmeteo_requests
 import pandas as pd
 import requests_cache
 from retry_requests import retry
+from pathlib import Path
 
 # Setup the Open-Meteo API client with cache and retry on error
 cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
@@ -18,7 +19,8 @@ params = {
 	"start_date": "2017-02-21",
 	"end_date": "2026-03-04",
 	"hourly": ["temperature_2m", "cloud_cover", "cloud_cover_low", "cloud_cover_high", "cloud_cover_mid", "wind_direction_100m", "wind_direction_10m", "wind_speed_100m", "wind_speed_10m", "rain", "snowfall", "snow_depth", "weather_code", "pressure_msl", "surface_pressure", "precipitation", "apparent_temperature", "dew_point_2m", "relative_humidity_2m", "is_day", "snow_depth_water_equivalent", "sunshine_duration"],
-	"timezone": "America/Los_Angeles",
+	# Request true UTC timestamps. Convert to America/Los_Angeles only for display.
+	"timezone": "UTC",
 	"temperature_unit": "fahrenheit",
 	"wind_speed_unit": "mph",
 	"precipitation_unit": "inch",
@@ -58,8 +60,8 @@ hourly_snow_depth_water_equivalent = hourly.Variables(20).ValuesAsNumpy()
 hourly_sunshine_duration = hourly.Variables(21).ValuesAsNumpy()
 
 hourly_data = {"date": pd.date_range(
-	start = pd.to_datetime(hourly.Time() + response.UtcOffsetSeconds(), unit = "s", utc = True),
-	end =  pd.to_datetime(hourly.TimeEnd() + response.UtcOffsetSeconds(), unit = "s", utc = True),
+	start = pd.to_datetime(hourly.Time(), unit = "s", utc = True),
+	end =  pd.to_datetime(hourly.TimeEnd(), unit = "s", utc = True),
 	freq = pd.Timedelta(seconds = hourly.Interval()),
 	inclusive = "left"
 )}
@@ -88,5 +90,6 @@ hourly_data["snow_depth_water_equivalent"] = hourly_snow_depth_water_equivalent
 hourly_data["sunshine_duration"] = hourly_sunshine_duration
 
 hourly_dataframe = pd.DataFrame(data = hourly_data)
-hourly_dataframe.to_csv("/Users/hudson/Desktop/road_project/weather/weather_date.csv")
+output_path = Path(__file__).resolve().parent / "historical_weather_date.csv"
+hourly_dataframe.to_csv(output_path, index=False)
 print("\nHourly data\n", hourly_dataframe)

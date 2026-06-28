@@ -1,0 +1,2 @@
+model_family,target,test_winter,average_precision,roc_auc,brier_score,test_prevalence
+Random forest,will_close_in_24h,2024-2025,0.2528927471310862,0.8070225132767807,0.04781302556279536,0.05630804953560371

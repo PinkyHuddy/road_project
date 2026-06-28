@@ -43,23 +43,22 @@ def build_closure_intervals(
     closures_df,
     closure_col="closure_time",
     reopen_col="reopening_time",
-    missing_reopen_hours=24,
+    closure_flag_col=None,
+    metadata_cols=None,
 ):
     """
     Build raw closure intervals from closure / reopening timestamps.
 
-    If reopening time is missing, create a placeholder end time:
-        closure_start + missing_reopen_hours
-
-    This placeholder end time is only used to define the ambiguous
-    post-closure window during weather labeling.
+    Only rows explicitly marked as closures are retained when
+    ``closure_flag_col`` is supplied. Missing reopening times remain missing;
+    they are right-censored observations, not invented 24-hour durations.
     """
     _require_columns(closures_df, [closure_col, reopen_col], df_name="closures_df")
 
-    if missing_reopen_hours <= 0:
-        raise ValueError("missing_reopen_hours must be positive.")
-
     intervals = closures_df.copy()
+    if closure_flag_col is not None:
+        _require_columns(intervals, [closure_flag_col], df_name="closures_df")
+        intervals = intervals.loc[intervals[closure_flag_col].eq(1)].copy()
     intervals[closure_col] = _coerce_datetime(intervals[closure_col])
     intervals[reopen_col] = _coerce_datetime(intervals[reopen_col])
 
@@ -68,12 +67,6 @@ def build_closure_intervals(
     intervals["closure_start"] = intervals[closure_col]
     intervals["has_reopening_time"] = intervals[reopen_col].notna()
     intervals["closure_end"] = intervals[reopen_col]
-
-    missing_mask = intervals["closure_end"].isna()
-    intervals.loc[missing_mask, "closure_end"] = (
-        intervals.loc[missing_mask, "closure_start"]
-        + pd.Timedelta(hours=missing_reopen_hours)
-    )
 
     bad_known = (
         intervals["has_reopening_time"]
@@ -84,8 +77,13 @@ def build_closure_intervals(
             "Found reopening times earlier than closure times in known intervals."
         )
 
+    metadata_cols = metadata_cols or []
+    _require_columns(intervals, metadata_cols, df_name="closures_df")
+    output_cols = [
+        "closure_start", "closure_end", "has_reopening_time", *metadata_cols
+    ]
     intervals = (
-        intervals[["closure_start", "closure_end", "has_reopening_time"]]
+        intervals[output_cols]
         .sort_values("closure_start")
         .reset_index(drop=True)
     )
@@ -98,15 +96,20 @@ def build_event_intervals(
     start_col="closure_start",
     end_col="closure_end",
     has_reopen_col="has_reopening_time",
-    max_gap_hours=6,
+    max_gap_hours=12,
 ):
     """
     Build event-level closure intervals in two steps:
 
     1. Collapse rows with the same closure_end into one event
        by taking the earliest closure_start.
-    2. Merge overlapping or near-adjacent resulting intervals
-       using max_gap_hours.
+    2. Attach closure updates to an already-known interval when their start
+       falls inside it.
+    3. Cluster remaining unknown-end closure reports by ``max_gap_hours``.
+
+    The output keeps ``has_reopening_time`` and ``source_record_count`` so
+    observed-duration events can be distinguished from censored events.
+    Unknown ends are never replaced with a fabricated duration.
     """
     _require_columns(intervals_df, [start_col, end_col], df_name="intervals_df")
 
@@ -117,57 +120,76 @@ def build_event_intervals(
     df[start_col] = _coerce_datetime(df[start_col])
     df[end_col] = _coerce_datetime(df[end_col])
 
-    df = df.dropna(subset=[start_col, end_col]).copy()
+    df = df.dropna(subset=[start_col]).copy()
 
     if has_reopen_col not in df.columns:
         df[has_reopen_col] = True
 
-    known = df.loc[df[has_reopen_col]].copy()
-    missing = df.loc[~df[has_reopen_col]].copy()
+    df[has_reopen_col] = df[has_reopen_col].fillna(False).astype(bool)
+    known = df.loc[df[has_reopen_col] & df[end_col].notna()].copy()
+    missing = df.loc[~(df[has_reopen_col] & df[end_col].notna())].copy()
 
     # Step 1: collapse known rows by shared end time
     if not known.empty:
-        known_collapsed = (
-            known.groupby(end_col, as_index=False)
-            .agg({start_col: "min"})
-            [[start_col, end_col]]
+        known_collapsed = known.groupby(end_col, as_index=False).agg(
+            **{start_col: (start_col, "min")},
+            source_record_count=(start_col, "size"),
         )
+        known_collapsed[has_reopen_col] = True
     else:
-        known_collapsed = pd.DataFrame(columns=[start_col, end_col])
+        known_collapsed = pd.DataFrame(
+            columns=[start_col, end_col, "source_record_count", has_reopen_col]
+        )
 
-    # Missing-reopen rows stay separate for now
-    missing_kept = missing[[start_col, end_col]].copy()
-
-    combined = (
-        pd.concat([known_collapsed, missing_kept], ignore_index=True)
-        .sort_values(start_col)
-        .reset_index(drop=True)
-    )
-
-    if combined.empty:
-        return combined
-
-    max_gap = pd.Timedelta(hours=max_gap_hours)
-
-    merged = []
-    current_start = combined.loc[0, start_col]
-    current_end = combined.loc[0, end_col]
-
-    for i in range(1, len(combined)):
-        next_start = combined.loc[i, start_col]
-        next_end = combined.loc[i, end_col]
-
-        if next_start <= current_end + max_gap:
-            current_end = max(current_end, next_end)
+    # A missing-end report inside a known interval is an update, not a new event.
+    unattached = []
+    for _, row in missing.sort_values(start_col).iterrows():
+        containing = known_collapsed.loc[
+            (known_collapsed[start_col] <= row[start_col])
+            & (known_collapsed[end_col] >= row[start_col])
+        ]
+        if containing.empty:
+            unattached.append(row[start_col])
         else:
-            merged.append((current_start, current_end))
-            current_start = next_start
-            current_end = next_end
+            idx = containing[end_col].idxmin()
+            known_collapsed.loc[idx, "source_record_count"] += 1
 
-    merged.append((current_start, current_end))
+    # Consecutive unmatched reports close together are treated as updates to
+    # one censored event. This assumption remains explicit in the output.
+    censored = []
+    max_gap = pd.Timedelta(hours=max_gap_hours)
+    for start in sorted(unattached):
+        if not censored or start - censored[-1][1] > max_gap:
+            censored.append([start, start, 1])
+        else:
+            censored[-1][1] = start
+            censored[-1][2] += 1
 
-    event_intervals = pd.DataFrame(merged, columns=[start_col, end_col])
-    return event_intervals
+    censored_df = pd.DataFrame(
+        [
+            {
+                start_col: first,
+                end_col: pd.NaT,
+                "last_closure_report": last,
+                "source_record_count": count,
+                has_reopen_col: False,
+            }
+            for first, last, count in censored
+        ]
+    )
+    known_collapsed["last_closure_report"] = pd.NaT
+    out = pd.concat([known_collapsed, censored_df], ignore_index=True)
+    out = out.sort_values(start_col).reset_index(drop=True)
+    out[start_col] = _coerce_datetime(out[start_col])
+    out[end_col] = _coerce_datetime(out[end_col])
+    out.insert(0, "event_id", [f"I80-{i:04d}" for i in range(1, len(out) + 1)])
+    out["duration_status"] = np.where(
+        out[has_reopen_col], "observed", "right_censored"
+    )
+    out["duration_hours"] = (
+        out[end_col] - out[start_col]
+    ).dt.total_seconds().div(3600).where(out[has_reopen_col])
+    return out
 
 
 def apply_closure_to_weather(
@@ -175,6 +197,7 @@ def apply_closure_to_weather(
     intervals_df,
     weather_time_col="datetime",
     closure_label_col="closure",
+    ambiguous_hours=24,
 ):
     """
     Annotate hourly weather rows using raw closure intervals.
@@ -220,13 +243,15 @@ def apply_closure_to_weather(
     )
 
     missing_reopen = intervals.loc[~intervals["has_reopening_time"]].copy()
-    known_reopen = intervals.loc[intervals["has_reopening_time"]].copy()
+    known_reopen = intervals.loc[
+        intervals["has_reopening_time"] & intervals["closure_end"].notna()
+    ].copy()
 
     # Pass 1: mark ambiguous windows for missing-reopen cases
     for _, row in missing_reopen.iterrows():
         start = row["closure_start"].floor("h")
         na_start = start + pd.Timedelta(hours=1)
-        na_end = start + pd.Timedelta(hours=23)
+        na_end = start + pd.Timedelta(hours=ambiguous_hours - 1)
 
         na_mask = (
             (weather[weather_time_col] >= na_start)

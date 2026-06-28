@@ -1,0 +1,4 @@
+target,positive_rows,positive_rate,negative_rows
+will_close_in_6h,971,0.01964433834388719,48458
+will_close_in_12h,1876,0.037953428149466915,47553
+will_close_in_24h,3531,0.07143579679944971,45898
