@@ -4,6 +4,19 @@ This portfolio project analyzes official CHP road-closure posts and historical w
 
 The final product is a four-level risk-ranking model designed for clear communication and future dashboard use. It does not attempt to predict closure duration, because too few events have complete reopening times for a reliable duration model.
 
+## Installation
+
+Create and activate a Python virtual environment, then install every notebook and project dependency from the root requirements file:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
+```
+
+The requirements cover the main construction, EDA, and modeling notebooks as well as the archived weather, Twitter, Supabase, Facebook, and PeMS exploration code. Standard-library and local project imports do not require separate packages.
+
 ## Project overview
 
 The modeling dataset combines:
