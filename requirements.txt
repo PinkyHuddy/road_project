@@ -10,7 +10,8 @@ scipy>=1.14,<2
 openpyxl>=3.1,<4
 
 # Modeling and saved model artifacts
-scikit-learn>=1.6,<2
+# Saved joblib model artifacts must be loaded with their training version.
+scikit-learn==1.8.0
 joblib>=1.4,<2
 
 # Historical weather extraction

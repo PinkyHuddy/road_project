@@ -1,4 +1,2 @@
-target,model,average_precision,threshold
-will_close_in_12h,Linear regression,0.09103904351499977,0.22
-will_close_in_24h,Linear regression,0.105616586841041,0.26
-will_close_in_6h,Linear regression,0.13506338087886544,0.13999999999999999
+target,model,validation_average_precision,selected_candidate
+road_closed_within_24h,Random forest,0.4101,1

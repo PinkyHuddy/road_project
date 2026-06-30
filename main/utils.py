@@ -314,53 +314,37 @@ def add_closure_start_column(
     return df
 
 
-def make_future_closure_target(
+def make_future_road_status_target(
     df,
     time_col="date",
-    start_col="closure_start",
     closure_col="closure",
     horizon_hours=24,
-    open_only=True,
 ):
+    """Label whether the road is closed at any point in the future horizon.
+
+    The current hour is excluded. A row is positive when at least one exact
+    hourly timestamp from ``t + 1`` through ``t + horizon_hours`` is confirmed
+    closed. It is negative only when every future hour is present and confirmed
+    open. Otherwise the target is unknown.
     """
-    Create a target for whether a closure start will occur within the next horizon.
-
-    For each closure start at time T:
-    - rows from T - horizon_hours through T - 1 hour get target = 1
-    - the closure-start row itself does NOT get target = 1
-
-    If open_only=True, only rows with closure == 0 are labeled positive.
-    """
-    required_cols = [time_col, start_col]
-    if open_only:
-        required_cols.append(closure_col)
-    _require_columns(df, required_cols, df_name="df")
-
+    _require_columns(df, [time_col, closure_col], df_name="df")
     if horizon_hours <= 0:
         raise ValueError("horizon_hours must be positive.")
 
     out = df.copy().sort_values(time_col).reset_index(drop=True)
     out[time_col] = _coerce_datetime(out[time_col])
 
-    target_col = f"will_close_in_{horizon_hours}h"
-    out[target_col] = 0
+    any_closed = pd.Series(False, index=out.index)
+    any_unknown = pd.Series(False, index=out.index)
 
-    closure_starts = (
-        out.loc[out[start_col] == 1, time_col]
-        .dropna()
-        .drop_duplicates()
-        .sort_values()
-    )
+    for step in range(1, horizon_hours + 1):
+        future_status = out[closure_col].shift(-step)
+        future_time = out[time_col].shift(-step)
+        exact_hour = future_time.sub(out[time_col]).eq(pd.Timedelta(hours=step))
 
-    for start_time in closure_starts:
-        window_start = start_time - pd.Timedelta(hours=horizon_hours)
-        window_end = start_time
+        any_closed |= exact_hour & future_status.eq(1)
+        any_unknown |= ~exact_hour | future_status.isna()
 
-        mask = (out[time_col] >= window_start) & (out[time_col] < window_end)
-
-        if open_only:
-            mask = mask & (out[closure_col] == 0)
-
-        out.loc[mask, target_col] = 1
-
+    target_col = f"road_closed_within_{horizon_hours}h"
+    out[target_col] = np.where(any_closed, 1.0, np.where(any_unknown, np.nan, 0.0))
     return out

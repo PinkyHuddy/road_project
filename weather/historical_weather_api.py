@@ -1,95 +1,119 @@
-import openmeteo_requests
+"""Download historical Donner Pass weather using only the requests library."""
 
-import pandas as pd
-import requests_cache
-from retry_requests import retry
+import requests
 from pathlib import Path
 
-# Setup the Open-Meteo API client with cache and retry on error
-cache_session = requests_cache.CachedSession('.cache', expire_after = -1)
-retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
-openmeteo = openmeteo_requests.Client(session = retry_session)
 
-# Make sure all required weather variables are listed here
-# The order of variables in hourly or daily is important to assign them correctly below
-url = "https://archive-api.open-meteo.com/v1/archive"
-params = {
-	"latitude": 39.342964,
-	"longitude": -120.328979,
-	"start_date": "2017-02-21",
-	"end_date": "2026-03-04",
-	"hourly": ["temperature_2m", "cloud_cover", "cloud_cover_low", "cloud_cover_high", "cloud_cover_mid", "wind_direction_100m", "wind_direction_10m", "wind_speed_100m", "wind_speed_10m", "rain", "snowfall", "snow_depth", "weather_code", "pressure_msl", "surface_pressure", "precipitation", "apparent_temperature", "dew_point_2m", "relative_humidity_2m", "is_day", "snow_depth_water_equivalent", "sunshine_duration"],
-	# Request true UTC timestamps. Convert to America/Los_Angeles only for display.
-	"timezone": "UTC",
-	"temperature_unit": "fahrenheit",
-	"wind_speed_unit": "mph",
-	"precipitation_unit": "inch",
+URL = "https://archive-api.open-meteo.com/v1/archive"
+OUTPUT_PATH = Path(__file__).resolve().parent / "historical_weather_api.csv"
+
+HOURLY_VARIABLES = [
+    "temperature_2m",
+    "cloud_cover",
+    "cloud_cover_low",
+    "cloud_cover_high",
+    "cloud_cover_mid",
+    "wind_direction_100m",
+    "wind_direction_10m",
+    "wind_speed_100m",
+    "wind_speed_10m",
+    "rain",
+    "snowfall",
+    "snow_depth",
+    "weather_code",
+    "pressure_msl",
+    "surface_pressure",
+    "precipitation",
+    "apparent_temperature",
+    "dew_point_2m",
+    "relative_humidity_2m",
+    "is_day",
+    "snow_depth_water_equivalent",
+    "sunshine_duration",
+]
+
+PARAMS = {
+    "latitude": 39.342964,
+    "longitude": -120.328979,
+    "start_date": "2017-02-21",
+    "end_date": "2026-03-04",
+    "hourly": ",".join(HOURLY_VARIABLES),
+    "timezone": "UTC",
+    "temperature_unit": "fahrenheit",
+    "wind_speed_unit": "mph",
+    "precipitation_unit": "inch",
 }
-responses = openmeteo.weather_api(url, params=params)
 
-# Process first location. Add a for-loop for multiple locations or weather models
-response = responses[0]
-print(f"Coordinates: {response.Latitude()}°N {response.Longitude()}°E")
-print(f"Elevation: {response.Elevation()} m asl")
-print(f"Timezone: {response.Timezone()}{response.TimezoneAbbreviation()}")
-print(f"Timezone difference to GMT+0: {response.UtcOffsetSeconds()}s")
 
-# Process hourly data. The order of variables needs to be the same as requested.
-hourly = response.Hourly()
-hourly_temperature_2m = hourly.Variables(0).ValuesAsNumpy()
-hourly_cloud_cover = hourly.Variables(1).ValuesAsNumpy()
-hourly_cloud_cover_low = hourly.Variables(2).ValuesAsNumpy()
-hourly_cloud_cover_high = hourly.Variables(3).ValuesAsNumpy()
-hourly_cloud_cover_mid = hourly.Variables(4).ValuesAsNumpy()
-hourly_wind_direction_100m = hourly.Variables(5).ValuesAsNumpy()
-hourly_wind_direction_10m = hourly.Variables(6).ValuesAsNumpy()
-hourly_wind_speed_100m = hourly.Variables(7).ValuesAsNumpy()
-hourly_wind_speed_10m = hourly.Variables(8).ValuesAsNumpy()
-hourly_rain = hourly.Variables(9).ValuesAsNumpy()
-hourly_snowfall = hourly.Variables(10).ValuesAsNumpy()
-hourly_snow_depth = hourly.Variables(11).ValuesAsNumpy()
-hourly_weather_code = hourly.Variables(12).ValuesAsNumpy()
-hourly_pressure_msl = hourly.Variables(13).ValuesAsNumpy()
-hourly_surface_pressure = hourly.Variables(14).ValuesAsNumpy()
-hourly_precipitation = hourly.Variables(15).ValuesAsNumpy()
-hourly_apparent_temperature = hourly.Variables(16).ValuesAsNumpy()
-hourly_dew_point_2m = hourly.Variables(17).ValuesAsNumpy()
-hourly_relative_humidity_2m = hourly.Variables(18).ValuesAsNumpy()
-hourly_is_day = hourly.Variables(19).ValuesAsNumpy()
-hourly_snow_depth_water_equivalent = hourly.Variables(20).ValuesAsNumpy()
-hourly_sunshine_duration = hourly.Variables(21).ValuesAsNumpy()
+def _csv_value(value):
+    """Convert a scalar to a valid CSV field without importing csv."""
+    if value is None:
+        return ""
+    text = str(value)
+    if any(character in text for character in (",", '"', "\n", "\r")):
+        return '"' + text.replace('"', '""') + '"'
+    return text
 
-hourly_data = {"date": pd.date_range(
-	start = pd.to_datetime(hourly.Time(), unit = "s", utc = True),
-	end =  pd.to_datetime(hourly.TimeEnd(), unit = "s", utc = True),
-	freq = pd.Timedelta(seconds = hourly.Interval()),
-	inclusive = "left"
-)}
 
-hourly_data["temperature_2m"] = hourly_temperature_2m
-hourly_data["cloud_cover"] = hourly_cloud_cover
-hourly_data["cloud_cover_low"] = hourly_cloud_cover_low
-hourly_data["cloud_cover_high"] = hourly_cloud_cover_high
-hourly_data["cloud_cover_mid"] = hourly_cloud_cover_mid
-hourly_data["wind_direction_100m"] = hourly_wind_direction_100m
-hourly_data["wind_direction_10m"] = hourly_wind_direction_10m
-hourly_data["wind_speed_100m"] = hourly_wind_speed_100m
-hourly_data["wind_speed_10m"] = hourly_wind_speed_10m
-hourly_data["rain"] = hourly_rain
-hourly_data["snowfall"] = hourly_snowfall
-hourly_data["snow_depth"] = hourly_snow_depth
-hourly_data["weather_code"] = hourly_weather_code
-hourly_data["pressure_msl"] = hourly_pressure_msl
-hourly_data["surface_pressure"] = hourly_surface_pressure
-hourly_data["precipitation"] = hourly_precipitation
-hourly_data["apparent_temperature"] = hourly_apparent_temperature
-hourly_data["dew_point_2m"] = hourly_dew_point_2m
-hourly_data["relative_humidity_2m"] = hourly_relative_humidity_2m
-hourly_data["is_day"] = hourly_is_day
-hourly_data["snow_depth_water_equivalent"] = hourly_snow_depth_water_equivalent
-hourly_data["sunshine_duration"] = hourly_sunshine_duration
+def _utc_timestamp(value):
+    """Match the UTC timestamp representation used by the previous pandas output."""
+    timestamp = value.replace("T", " ")
+    if len(timestamp) == 16:
+        timestamp += ":00"
+    if not timestamp.endswith(("Z", "+00:00")):
+        timestamp += "+00:00"
+    return timestamp.replace("Z", "+00:00")
 
-hourly_dataframe = pd.DataFrame(data = hourly_data)
-output_path = Path(__file__).resolve().parent / "historical_weather_date.csv"
-hourly_dataframe.to_csv(output_path, index=False)
-print("\nHourly data\n", hourly_dataframe)
+
+def fetch_historical_weather():
+    """Request and validate the historical hourly weather response."""
+    response = requests.get(URL, params=PARAMS, timeout=120)
+    response.raise_for_status()
+    payload = response.json()
+
+    if "hourly" not in payload:
+        raise ValueError(f"Open-Meteo response is missing hourly data: {payload}")
+
+    hourly = payload["hourly"]
+    if "time" not in hourly:
+        raise ValueError("Open-Meteo hourly data is missing timestamps.")
+
+    expected_rows = len(hourly["time"])
+    for variable in HOURLY_VARIABLES:
+        if variable not in hourly:
+            raise ValueError(f"Open-Meteo hourly data is missing {variable!r}.")
+        if len(hourly[variable]) != expected_rows:
+            raise ValueError(
+                f"Open-Meteo returned {len(hourly[variable])} values for {variable!r}; "
+                f"expected {expected_rows}."
+            )
+
+    return payload
+
+
+def save_hourly_csv(payload, output_path=OUTPUT_PATH):
+    """Write the response using the original date-first column order."""
+    hourly = payload["hourly"]
+    columns = ["date", *HOURLY_VARIABLES]
+
+    with Path(output_path).open("w", encoding="utf-8", newline="") as file:
+        file.write(",".join(columns) + "\n")
+        for row_number, timestamp in enumerate(hourly["time"]):
+            row = [_utc_timestamp(timestamp)]
+            row.extend(hourly[variable][row_number] for variable in HOURLY_VARIABLES)
+            file.write(",".join(_csv_value(value) for value in row) + "\n")
+
+
+def main():
+    payload = fetch_historical_weather()
+    save_hourly_csv(payload)
+
+    print(f"Coordinates: {payload.get('latitude')}°N {payload.get('longitude')}°E")
+    print(f"Elevation: {payload.get('elevation')} m asl")
+    print(f"Timezone: {payload.get('timezone')} {payload.get('timezone_abbreviation')}")
+    print(f"Timezone difference to GMT+0: {payload.get('utc_offset_seconds')}s")
+    print(f"Saved {len(payload['hourly']['time'])} hourly rows to {OUTPUT_PATH}")
+
+
+if __name__ == "__main__":
+    main()

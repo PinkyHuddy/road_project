@@ -1,7 +1,26 @@
-*.gz
+# Local Python environments and secrets
 .venv/
 .env
+
+# Python and notebook caches
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.openmeteo_cache*
+
+# Operating-system files and compressed downloads
 .DS_Store
+*.gz
+
+# Archived or out-of-scope project branches
+/PeMS_System(dead_end)/
+/twitter/
+
+# Duplicate local README
+/README 2.me
+
+# Alternate new-closure-onset project (kept locally, excluded from portfolio)
+/new_closures/
 
 
-
+/archive/
