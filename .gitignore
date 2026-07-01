@@ -22,5 +22,11 @@ __pycache__/
 # Alternate new-closure-onset project (kept locally, excluded from portfolio)
 /new_closures/
 
+# Generated AWS Lambda deployment artifacts
+/main/lambda_dist/
+
+# Deployed AWS Lambda source and tests
+/main/lambda/
+
 
 /archive/
