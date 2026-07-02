@@ -23,6 +23,12 @@ def _align_datetime_series(reference, other, reference_name="reference", other_n
     - naive + naive  -> leave as-is
     - aware + naive or naive + aware -> raise, to avoid silent mistakes
     """
+    # An all-missing datetime series has no meaningful timezone. Returning it
+    # unchanged lets callers handle censored/unknown timestamps without a
+    # false timezone-mismatch error.
+    if not other.notna().any():
+        return other
+
     ref_tz = reference.dt.tz
     other_tz = other.dt.tz
 
@@ -68,14 +74,18 @@ def build_closure_intervals(
     intervals["has_reopening_time"] = intervals[reopen_col].notna()
     intervals["closure_end"] = intervals[reopen_col]
 
-    bad_known = (
-        intervals["has_reopening_time"]
-        & (intervals["closure_end"] < intervals["closure_start"])
-    )
-    if bad_known.any():
-        raise ValueError(
-            "Found reopening times earlier than closure times in known intervals."
+    known = intervals["has_reopening_time"]
+    if known.any():
+        known_ends = _align_datetime_series(
+            intervals.loc[known, "closure_start"],
+            intervals.loc[known, "closure_end"],
+            reference_name="known closure times",
+            other_name="known reopening times",
         )
+        if (known_ends < intervals.loc[known, "closure_start"]).any():
+            raise ValueError(
+                "Found reopening times earlier than closure times in known intervals."
+            )
 
     metadata_cols = metadata_cols or []
     _require_columns(intervals, metadata_cols, df_name="closures_df")
