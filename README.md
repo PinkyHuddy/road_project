@@ -96,7 +96,7 @@ backend code are intentionally excluded from this public repository.
 Python 3.11 or newer is recommended.
 
 ```bash
-git clone git@github.com:PinkyHuddy/road_project.git
+git clone https://github.com/PinkyHuddy/road_project.git
 cd road_project
 python3 -m venv .venv
 source .venv/bin/activate
