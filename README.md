@@ -69,6 +69,66 @@ compared using validation average precision. Risk-category thresholds were
 tuned on validation results, checked for monotonic observed risk and minimum
 category size, then frozen before final testing.
 
+## Production deployment: AWS Lambda and S3
+
+I deployed the trained model as a serverless inference pipeline on AWS. The
+production source and model artifact are kept in a separate private repository,
+but the deployed architecture is:
+
+```text
+Open-Meteo API
+      │  24 recent hourly observations
+      ▼
+AWS Lambda ──► feature engineering ──► trained random forest
+      │                                      │
+      │ raw weather                          │ probability + risk level
+      ▼                                      ▼
+S3 timestamped history              S3 timestamped history
+                                             │
+                                             ▼
+                               i80/latest/current_risk.json
+                                             │
+                                             ▼
+                                         Dashboard
+```
+
+Each Lambda invocation performs the complete scoring workflow:
+
+1. Request the latest 24 hours of Donner Pass weather from Open-Meteo using
+   UTC timestamps and the same units used during training.
+2. Validate and transform the response into the model's required feature
+   schema, including trailing storm summaries.
+3. Load the versioned `joblib` model artifact and calculate the closure
+   probability.
+4. Apply the frozen thresholds stored inside the artifact to return Low,
+   Medium, High, or Extreme risk.
+5. Write both the raw weather response and prediction result to Amazon S3.
+
+S3 uses two complementary storage patterns:
+
+- `i80/raw_weather/donner_pass_weather_<UTC timestamp>.json` preserves the
+  exact input used for each prediction.
+- `i80/risk_history/risk_<UTC timestamp>.json` creates an append-only audit
+  history of model outputs.
+- `i80/latest/current_risk.json` is overwritten after a successful run so the
+  dashboard has one stable object to request.
+
+The current-risk payload contains its UTC generation time, closure probability,
+risk rank, and the S3 key of the corresponding weather input. This makes every
+displayed result traceable to the data that produced it while keeping dashboard
+reads simple.
+
+Runtime configuration is supplied through Lambda environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `OUTPUT_BUCKET` | Destination S3 bucket for weather and risk JSON |
+| `MODEL_PATH` | Optional deployed model path; defaults to the packaged artifact |
+
+The Lambda execution role provides S3 write access, so AWS credentials are not
+stored in source code. Deployment ZIPs, backend implementation details, and the
+trained binary are intentionally excluded from this public repository.
+
 ## Repository structure
 
 ```text
